@@ -36,6 +36,7 @@ TRANSLATIONS = {
         "submit":            "Submit",
         "correct":           "Correct!",
         "incorrect_msgs":    ["Incorrect!", "Try again!", "Not quite!", "Keep trying!", "Almost there!"],
+        "time_up":           "Time's up!",
         "enter_number":      "Please enter a whole number.",
         "question_of":       lambda n, t: f"Question {n} / {t}",
         "quiz_complete":     "Quiz Complete!",
@@ -46,6 +47,7 @@ TRANSLATIONS = {
         "by_author":         "by: Mark Khomenko",
         "settings":          "Settings",
         "sound_effects":     "Sound Effects",
+        "timer":             "Timer (10s)",
         "back_to_main":      "Back to Main Menu",
     },
     "Français": {
@@ -68,6 +70,7 @@ TRANSLATIONS = {
         "submit":            "Soumettre",
         "correct":           "Correct!",
         "incorrect_msgs":    ["Incorrect!", "Réessaie!", "Pas tout à fait!", "Continue!", "Presque!"],
+        "time_up":           "Temps écoulé!",
         "enter_number":      "Veuillez entrer un nombre entier.",
         "question_of":       lambda n, t: f"Question {n} / {t}",
         "quiz_complete":     "Quiz Terminé!",
@@ -78,6 +81,7 @@ TRANSLATIONS = {
         "by_author":         "par: Mark Khomenko",
         "settings":          "Paramètres",
         "sound_effects":     "Effets Sonores",
+        "timer":             "Minuterie (10s)",
         "back_to_main":      "Retour au Menu Principal",
     },
 }
@@ -109,6 +113,7 @@ state = {
     "add_sub_pool":  [],
     "mul_div_pool":  [],
     "sound_enabled": True,
+    "timer_enabled": True,
 }
 
 
@@ -265,10 +270,14 @@ class OperationScreen(tk.Frame):
         master.show(QuizScreen)
 
 
+QUESTION_TIME = 10  # seconds per question
+
 class QuizScreen(tk.Frame):
     def __init__(self, master):
         super().__init__(master, bg=BG)
         self._master = master
+        self._timer_job = None
+        self._time_left = QUESTION_TIME
         op = state["operation"]
 
         # ── Header ──────────────────────────────────────────────────────────
@@ -288,6 +297,9 @@ class QuizScreen(tk.Frame):
         # ── Question ─────────────────────────────────────────────────────────
         self._question_lbl = label(self, "", size=48, bold=True)
         self._question_lbl.pack(pady=(90, 40))
+
+        # ── Timer ─────────────────────────────────────────────────────────────
+        self._timer_lbl = label(self, "", size=28, bold=True, color=ACCENT)
 
         # ── Answer entry ─────────────────────────────────────────────────────
         self._answer = tk.StringVar()
@@ -321,6 +333,51 @@ class QuizScreen(tk.Frame):
         sym = OP_SYMBOL[state["operation"]]
         self._question_lbl.configure(text=f"{a}  {sym}  {b}  =  ?")
         self._entry.focus()
+        if state["timer_enabled"]:
+            self._timer_lbl.place(x=20, y=70)
+            self._start_timer()
+        else:
+            self._timer_lbl.place_forget()
+
+    def _start_timer(self):
+        self._cancel_timer()
+        self._time_left = QUESTION_TIME
+        self._tick()
+
+    def _cancel_timer(self):
+        if self._timer_job is not None:
+            self.after_cancel(self._timer_job)
+            self._timer_job = None
+
+    def _tick(self):
+        secs = self._time_left
+        if secs <= 3:
+            color = RED
+        elif secs <= 6:
+            color = ORANGE
+        else:
+            color = ACCENT
+        self._timer_lbl.configure(text=f"⏱  {secs}", fg=color)
+        if secs == 0:
+            self._time_expired()
+            return
+        self._time_left -= 1
+        self._timer_job = self.after(1000, self._tick)
+
+    def _time_expired(self):
+        if not state["timer_enabled"]:
+            return
+        self._cancel_timer()
+        state["wrong"] += 1
+        play_wrong_sound()
+        self._feedback_lbl.configure(text=t("time_up"), fg=RED)
+        self._answer.set("")
+        state["current"] += 1
+        if state["current"] >= state["num_questions"]:
+            self._bar.place(relwidth=1)
+            self.after(900, lambda: self._master.show(ResultScreen))
+        else:
+            self.after(900, self._load_question)
 
     def _submit(self):
         raw = self._answer.get().strip()
@@ -332,6 +389,7 @@ class QuizScreen(tk.Frame):
             self._feedback_lbl.configure(text=t("enter_number"), fg=RED)
             return
 
+        self._cancel_timer()
         expected = correct_answer(state["num1"], state["num2"], state["operation"])
 
         if answer == expected:
@@ -349,6 +407,7 @@ class QuizScreen(tk.Frame):
             self._feedback_lbl.configure(text=random.choice(t("incorrect_msgs")), fg=RED)
             self._answer.set("")
             self._entry.focus()
+            self._start_timer()
 
 
 class ResultScreen(tk.Frame):
@@ -438,6 +497,14 @@ class SettingsScreen(tk.Frame):
         label(row, t("sound_effects"), size=16, bg=CARD).pack(side="left")
         ToggleSwitch(row, state["sound_enabled"],
                      lambda v: state.update(sound_enabled=v)).pack(side="right")
+
+        tk.Frame(card, bg=SURFACE, height=1).pack(fill="x", padx=32)
+
+        row2 = tk.Frame(card, bg=CARD)
+        row2.pack(fill="x", padx=32, pady=26)
+        label(row2, t("timer"), size=16, bg=CARD).pack(side="left")
+        ToggleSwitch(row2, state["timer_enabled"],
+                     lambda v: state.update(timer_enabled=v)).pack(side="right")
 
         # ── Back button ────────────────────────────────────────────────────
         divider(self, padx=220, pady=40)
